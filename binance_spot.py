@@ -1,56 +1,93 @@
 from logging import exception
 import sys
 import time
-import pandas as pd
-import calendar
-from datetime import datetime, timedelta
+from helpers import interval_to_ms, utcdate_to_milliseconds
 from data_client import MarketData
+import os
+import pandas as pd
 
 
-# datespan function to iterate through dates
+def get_earliest_timestamp(symbol, interval):
+    """Get the earliest timestamp from specified interval
+    :param symbol: ticker name
+    :param interval: timeperiod of the candlestick
+
+    :return:
+        time in milliseconds
+    """
+    kline_params = {
+        'symbol': symbol,
+        'interval': interval,
+        'limit': 1,
+        'startTime': 0,
+        'endTime': int(time.time() * 1000)
+    }
+
+    klines_data = MarketData(
+        'https://api.binance.com/api/v3/klines', kline_params).getMarketData()
+    print(klines_data)
+    return klines_data[0][0]
 
 
-def datespan(startDate, endDate, delta=timedelta(days=1)):
-    currentDate = startDate
-    while currentDate < endDate:
-        yield currentDate
-        currentDate += delta
+def getKlines(start_date, end_date, ticker, timeperiod, limit=500):
+    """Get Klines data for specified start date and end date, limit 500 per call
+    :param start_date: starting date in UTC
+    :param end_date: end date in utc
+    :param ticker: name or symbol of the desired currency pair
+    :param limit: default 500
 
-
-def get_unix_ms_from_date(date):
-    return int(calendar.timegm(date.timetuple()) * 1000 + date.microsecond / 1000)
-
-
-def getKlines(start_date, end_date, ticker, timeperiod):
-    # get list of days between the specified days
-    df = pd.DataFrame()
-    # for day in datespan(start_date, end_date, delta=timedelta(days=1)):
-    #     # Candlestick (kline) parameters
-    #     print(day)
-    #     kline = {
-    #         'symbol': ticker,
-    #         'startTime': int(time.mktime(day.timetuple())),
-    #         'endTime': int(time.mktime(end_date.timetuple())),
-    #         'interval': timeperiod,
-    #         'limit': 1000
-    #     }
-
-    #     print(kline)
-
-    #     klines = MarketData('https://api.binance.com/api/v3/klines', kline)
-    #     klines_data = klines.getMarketData()
-    #     df = pd.concat([df, pd.DataFrame(klines_data)])
-    #     # dont exceed request limits
-    #     time.sleep(0.5)
-
-    # current_time = 0
-    # start_time = int(time.mktime(start_date.timetuple()))
-
+    :return: 
+        csv file with historical kline data saved to folder csv historical data
+    """
     
+    df = pd.DataFrame()
+    output_data = []
+    timeperiod_ms = interval_to_ms(timeperiod)
+    start_ts = utcdate_to_milliseconds(start_date)
 
-    filename = f'Binance_data_{start_date.date()}_to_{end_date.date()}_{timeperiod}.csv'
+    # get first available timestamp for given timeperiod
+    first_valid_timestamp = get_earliest_timestamp(
+        symbol=ticker, interval=timeperiod)
+    start_ts = max(start_ts, first_valid_timestamp)
+    end_ts = utcdate_to_milliseconds(end_date)
+
+    # iterator
+    it = 0
+    while True:
+        kline = {
+            'symbol': ticker,
+            'startTime': start_ts,
+            'endTime': end_ts,
+            'interval': timeperiod,
+            'limit': limit
+        }
+
+        klines_data = MarketData(
+            'https://api.binance.com/api/v3/klines', kline).getMarketData()
+        if not len(klines_data):
+            break
+
+        output_data += klines_data
+
+        start_ts = klines_data[-1][0]
+
+        it += 1
+
+        if len(klines_data) < limit:
+            break
+
+        start_ts += timeperiod_ms
+
+        if it % 3 == 0:
+            time.sleep(1)
+
+    df = pd.concat([df, pd.DataFrame(output_data)])
+    filename = f'./csv_historical_data/Binance_data_{start_date}_to_{end_date}_{timeperiod}.csv'
+    
+    if os.path.exists("./csv_historical_data/" + filename ):
+        os.remove("./csv_historical_data/" + filename)
+    
     df.to_csv(filename)
-
     return print(f'{filename} file created!')
 
 
@@ -58,15 +95,15 @@ if __name__ == "__main__":
     # get specific ticker from input
     if len(sys.argv) < 1:
         raise ValueError(
-            'Please provide ticker name, timeperiod (1m, 5m, 30m), start_date(mm/DD/YY), end_date(mm/DD/YY)')
+            'Please provide ticker name, timeperiod (1m, 5m, 30m), start_date (eg. 1 Jan, 2021), end_date(eg. 2 Jan, 2021')
 
     print(f'Script Name is {sys.argv[0]}')
     ticker = sys.argv[1]
     timeperiod = sys.argv[2]
 
-    start_date = datetime.strptime(sys.argv[3], '%m/%d/%Y')
-    end_date = datetime.strptime(
-        sys.argv[4], '%m/%d/%Y') + timedelta(days=1) - timedelta(microseconds=1)
+    #date in human readable formats
+    start_date = sys.argv[3]
+    end_date = sys.argv[4]
 
     print(
         f'Getting candlestick data for {ticker} of {timeperiod} from {start_date} to {end_date}')
