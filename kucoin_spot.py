@@ -1,16 +1,33 @@
-from logging import exception
 import sys
+import os
 import time
 import pandas as pd
 from data_client import MarketData
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
+from helpers import utcdate_to_seconds, interval_to_ms
 
-# datespan function to iterate through dates
-def datespan(startDate, endDate, delta=timedelta(days=1)):
-    currentDate = startDate
-    while currentDate < endDate:
-        yield currentDate
-        currentDate += delta
+
+def get_earliest_timestamp(symbol, interval):
+    """Get the earliest timestamp from specified interval
+    :param symbol: ticker name
+    :param interval: timeperiod of the candlestick
+
+    :return:
+        time in milliseconds
+    """
+    kline_params = {
+        'symbol': symbol,
+        'type': interval,
+        'limit': 1,
+        'startTime': 0,
+        'endTime': int(time.time() * 1000)
+    }
+
+    klines_data = MarketData(
+        'https://api.kucoin.com/api/v1/market/candles', kline_params).getMarketData()
+    return klines_data.get('data')[0][0]
+
+
 
 def getTickers():
     # get list of all tickers from KuCoin Exchange
@@ -22,29 +39,62 @@ def getTickers():
     return tickers
 
 
-def getKlines(start_date, end_date, ticker, timeperiod):
-    # get list of days between the specified days
+def getKlines(start_date, end_date, ticker, timeperiod, limit=500):
     df = pd.DataFrame()
-    for day in datespan(start_date, end_date, delta=timedelta(days=1)):
-        # Candlestick (kline) parameters
+
+    output_data = []
+    print(timeperiod)
+    timeperiod_ms = interval_to_ms(timeperiod)
+
+    # get first available timestamp for given timeperiod
+    first_valid_timestamp = int(get_earliest_timestamp(
+        symbol=ticker, interval=timeperiod))
+
+    start_ts = utcdate_to_seconds(start_date)
+
+    start_ts = max(start_ts, first_valid_timestamp)
+    end_ts = utcdate_to_seconds(end_date) 
+
+    print(end_ts)
+
+    # iterator
+    it = 0
+    while True:
         kline = {
             'symbol': ticker,
-            'startAt': int(time.mktime(day.timetuple())),
-            'endAt': int(time.mktime(end_date.timetuple())),
-            'type': timeperiod
+            'startTime': start_ts,
+            'endTime': end_ts,
+            'type': timeperiod,
+            'limit': limit
         }
 
-        print(kline)
+        klines_data = MarketData(
+            'https://api.kucoin.com/api/v1/market/candles', kline).getMarketData().get('data')
 
-        klines = MarketData('https://api.kucoin.com/api/v1/market/candles', kline)
-        klines_data = klines.getMarketData().get('data')
-        df = pd.concat([df, pd.DataFrame(klines_data)])
-        time.sleep(0.5)
+        if not len(klines_data):
+            break
+
+        output_data += klines_data
+        start_ts = int(klines_data[-1][0])
+        
+        it += 1
+        
+        if len(klines_data) < limit:
+            break
+        
+        start_ts = start_ts + (timeperiod_ms/1000) 
+        print(start_ts)
+        if it % 3 == 0:
+            time.sleep(1)
+
+    df = pd.concat([df, pd.DataFrame(output_data)])
+    filename = f'./csv_historical_data/Kucoin_data_{start_date}_to_{end_date}_{timeperiod}.csv'
     
-    filename = f'Kucoin_data_{start_date.date()}_to_{end_date.date()}_{timeperiod}.csv'
+    if os.path.exists("./csv_historical_data/" + filename ):
+        os.remove("./csv_historical_data/" + filename)
+    
     df.to_csv(filename)
-
-    print(f'{filename} file created!')
+    return print(f'{filename} file created!')
 
 
 
@@ -52,14 +102,14 @@ if __name__ == "__main__":
     # get specific ticker from input
     if len(sys.argv) < 1:
         raise ValueError(
-            'Please provide ticker name, timeperiod (1min, 5min, 30min), MM/DD/YY')
+            'Please provide ticker name, timeperiod (1min, 5min, 30min), start_date (eg. 1 Jan, 2021), end_date(eg. 2 Jan, 2021')
 
     print(f'Script Name is {sys.argv[0]}')
     ticker = sys.argv[1]
     timeperiod = sys.argv[2]
 
-    start_date = datetime.strptime(sys.argv[3], '%m/%d/%Y')
-    end_date = datetime.strptime(sys.argv[4], '%m/%d/%Y') + timedelta(days=1) - timedelta(microseconds=1)
+    start_date = sys.argv[3]
+    end_date = sys.argv[4]
 
     print(
         f'Getting candlestick data for {ticker} of {timeperiod} from {start_date} to {end_date}')

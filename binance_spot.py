@@ -98,8 +98,8 @@ if __name__ == "__main__":
             'Please provide ticker name, timeperiod (1m, 5m, 30m), start_date (eg. 1 Jan, 2021), end_date(eg. 2 Jan, 2021')
 
     print(f'Script Name is {sys.argv[0]}')
-    ticker = sys.argv[1]
-    timeperiod = sys.argv[2]
+    ticker = str(sys.argv[1])
+    timeperiod = str(sys.argv[2])
 
     #date in human readable formats
     start_date = sys.argv[3]
