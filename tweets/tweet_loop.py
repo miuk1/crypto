@@ -24,6 +24,7 @@ def twint_search(searchterm, since, until, filename, limit):
     c.Output = filename
     c.Debug = True
     c.Limit = limit
+    c.Store_csv = True
 
     try:
         twint.run.Search(c)
@@ -63,7 +64,7 @@ def twint_loop(searchterm, since, until, limit):
     joined_list = glob.glob('scraped_tweets/*.csv')
         
     # Finally, the files are joined
-    result_obj = pd.concat([pd.read_csv(file, header=None, sep='\n') for file in joined_list])
+    result_obj = pd.concat([pd.read_csv(file) for file in joined_list])
     result_obj.to_csv(outputfile, index=False, encoding="utf-8")
 
     return print(f'Tweets saved to file ---> {outputfile}')
